@@ -1,0 +1,4 @@
+*.suo
+
+/CurlingCalendar/bin/
+/CurlingCalendar/obj/
