@@ -18,8 +18,10 @@ namespace CurlingCalendar
 			public string Sheet;
 			public string Name;
 			public DateTime Time;
-			public CalendarEvent(string name, string sheet, DateTime time)
+			public string League;
+			public CalendarEvent(string league, string name, string sheet, DateTime time)
 			{
+				League = league;
 				Sheet = sheet;
 				Name = name;
 				Time = time;
@@ -168,26 +170,31 @@ namespace CurlingCalendar
 
 				var mainBody = htmlDoc.GetElementbyId("rt-mainbody");
 				var tables = mainBody.SelectNodes(".//table");
+				var leagueName = "";
 				foreach (var table in tables)
 				{
 					var rows = table.SelectNodes(".//tr");
 					foreach (var row in rows)
 					{
 						var columns = row.SelectNodes(".//td").ToArray();
-						if (columns.Length != 5)
-							continue;
+						if (columns.Length == 1) //league name
+						{
+							leagueName = columns[0].InnerText.Trim();
+						}
+						else if (columns.Length == 5)
+						{
+							var date = DateTime.Parse(columns[1].InnerText);
+							var time = DateTime.Parse(columns[2].InnerText);
+							var datetime = new DateTime(date.Year, date.Month, date.Day, time.Hour, time.Minute, time.Second);
 
-						var date = DateTime.Parse(columns[1].InnerText);
-						var time = DateTime.Parse(columns[2].InnerText);
-						var datetime = new DateTime(date.Year, date.Month, date.Day, time.Hour, time.Minute, time.Second);
+							var dayOfWeek = datetime.DayOfWeek;
+							var game = columns[3].InnerText;
 
-						var dayOfWeek = datetime.DayOfWeek;
-						var game = columns[3].InnerText;
-
-						var sheet = columns[4].InnerText.Replace("Sheet: ", "");
-						if (!days.ContainsKey(dayOfWeek))
-							days.Add(dayOfWeek, new List<CalendarEvent>());
-						days[dayOfWeek].Add(new CalendarEvent(game, sheet, datetime));
+							var sheet = columns[4].InnerText.Replace("Sheet: ", "");
+							if (!days.ContainsKey(dayOfWeek))
+								days.Add(dayOfWeek, new List<CalendarEvent>());
+							days[dayOfWeek].Add(new CalendarEvent(leagueName, game, sheet, datetime));
+						}
 					}
 				}
 			}
@@ -197,19 +204,6 @@ namespace CurlingCalendar
 
 		private static void ProcessDays(Dictionary<DayOfWeek, List<CalendarEvent>> days)
 		{
-			var sfd = new System.Windows.Forms.SaveFileDialog
-			{
-				Title = "Title",
-				AddExtension = true,
-				AutoUpgradeEnabled = true,
-				DefaultExt = ".iCal",
-				Filter = "Calendar File (*.iCal)|*.ical",
-			};
-			var result = sfd.ShowDialog();
-			if (result != System.Windows.Forms.DialogResult.OK)
-				return;
-
-			var outPath = sfd.FileName;
 			var events = new List<CalendarEvent>();
 			foreach (var day in days)
 			{
@@ -226,9 +220,46 @@ namespace CurlingCalendar
 				{
 					var name = e.Name.Replace("vs", "").Replace(teamName, "").Trim();
 					name = string.Format("{0}: {1}", e.Sheet, name);
-					events.Add(new CalendarEvent(name, e.Sheet, e.Time));
+					events.Add(new CalendarEvent(e.League, name, e.Sheet, e.Time));
 				}
 			}
+
+			Console.Write("Would you like to save each league as a separate calendar (y/N)?");
+			var seperateCalendar = false;
+			var selection = Console.ReadLine().Trim().ToLower();
+			if (selection.StartsWith("y"))
+				seperateCalendar = true;
+
+
+			if (seperateCalendar)
+			{
+				foreach (var group in events.GroupBy(e => e.League))
+				{
+					SaveCalendar(group.Key, group);
+				}
+			}
+			else
+			{
+				SaveCalendar("Curling Calendar", events);
+			}
+		}
+
+		private static void SaveCalendar(string defaultName, IEnumerable<CalendarEvent> events)
+		{
+			var sfd = new System.Windows.Forms.SaveFileDialog
+			{
+				Title = string.Format("Save {0}", defaultName),
+				AddExtension = true,
+				AutoUpgradeEnabled = true,
+				DefaultExt = ".iCal",
+				Filter = "Calendar File (*.iCal)|*.ical",
+				FileName = string.Format("{0}.iCal", defaultName),
+			};
+			var result = sfd.ShowDialog();
+			if (result != System.Windows.Forms.DialogResult.OK)
+				return;
+
+			var outPath = sfd.FileName;
 
 			var builder = new StringBuilder();
 			builder.AppendLine("BEGIN:VCALENDAR");
