@@ -1,4 +1,5 @@
 *.suo
 
-/CurlingCalendar/bin/
-/CurlingCalendar/obj/
+bin/
+obj/
+nocommit/

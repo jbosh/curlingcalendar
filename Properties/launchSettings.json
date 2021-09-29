@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "CurlingCalendar": {
+      "commandName": "Project",
+      "workingDirectory": "$(ProjectDir)/nocommit"
+    }
+  }
+}
