@@ -1,4 +1,7 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
 using Microsoft.Data.Sqlite;
 
 namespace CurlingCalendar
@@ -9,6 +12,7 @@ namespace CurlingCalendar
         {
             public int UserId { get; }
             public Team Team { get; }
+
             public TeamMember(int userId, Team team)
             {
                 UserId = userId;
@@ -62,7 +66,16 @@ namespace CurlingCalendar
                     foreach (var teamMember in GetAll(team))
                     {
                         var user = User.FromId(teamMember.UserId)!;
-                        result.Add(user.FullName!, team);
+                        var fullName = user.FullName!;
+                        if (result.ContainsKey(fullName))
+                        {
+                            if (result[fullName] != team)
+                                throw new Exception($"Ambiguous people on different teams. {fullName} may be on {result[fullName]} and {team}.");
+                        }
+                        else
+                        {
+                            result.Add(fullName, team);
+                        }
                     }
                 }
 

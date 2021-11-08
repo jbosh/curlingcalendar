@@ -81,35 +81,74 @@ namespace CurlingCalendar
 
             while (true)
             {
-                Console.Write("Get games for player: ");
-                var line = Console.ReadLine();
-                if (!int.TryParse(line, out var userId))
+                Console.Write("Get games for player (ID or name): ");
+                var line = Console.ReadLine()!;
+                if (string.Equals(line, "exit", StringComparison.InvariantCultureIgnoreCase))
                 {
-                    Console.WriteLine("Invalid user ID.");
-                    continue;
+                    break;
                 }
 
-                var user = Database.User.FromId(userId);
-                if (user == null)
+                Database.User? user;
+                if (int.TryParse(line, out var userId))
                 {
-                    Console.WriteLine("Could not find user.");
-                    continue;
+                    user = Database.User.FromId(userId);
+                    if (user == null)
+                    {
+                        Console.WriteLine("Could not find user.");
+                        continue;
+                    }
+                }
+                else
+                {
+                    var users = Database.User.FromName(line).ToArray();
+                    if (users.Length == 0)
+                    {
+                        Console.WriteLine("Invalid user ID or could not find user.");
+                        continue;
+                    }
+
+                    if (users.Length == 1)
+                    {
+                        user = users[0];
+                    }
+                    else
+                    {
+                        while (true)
+                        {
+                            for (var i = 0; i < users.Length; i++)
+                            {
+                                var u = users[i];
+                                Console.WriteLine($"{i + 1}: {u.FullName}");
+                            }
+
+                            Console.Write("Multiple users were found. Which one would you like to use? [#] ");
+                            line = Console.ReadLine();
+                            if (!int.TryParse(line, out var index) || index <= 0 || index > users.Length)
+                            {
+                                Console.WriteLine($"Invalid number.");
+                                continue;
+                            }
+
+                            user = users[index - 1];
+                            break;
+                        }
+                    }
                 }
 
                 var calendar = new Calendar();
-                calendar.AddTimeZone(TimeZoneInfo.Local);
+                var localTimeZone = TimeZoneInfo.Local;
+                calendar.AddTimeZone(localTimeZone);
 
                 var userTeams = Database.TeamMember
-                    .GetAll(userId)
+                    .GetAll(user.Id)
                     .Select(t => t.Team.Id)
                     .ToHashSet();
-                foreach (var game in Database.Game.GetByUserId(userId))
+                foreach (var game in Database.Game.GetByUserId(user.Id))
                 {
                     var calendarEvent = new CalendarEvent();
                     var startTime = game.Time.ToDateTimeOffset();
-                    var endTime = startTime.AddHours(2);
-                    calendarEvent.Start = new CalDateTime(startTime.LocalDateTime);
-                    calendarEvent.End = new CalDateTime(endTime.LocalDateTime);
+                    calendarEvent.Start = new CalDateTime(startTime.DateTime, localTimeZone.Id);
+                    calendarEvent.End = calendarEvent.Start.AddHours(2);
                     calendarEvent.Uid = $"UID:{game.LeagueId}-{game.Time.LocalDateTime.ToDateTimeUnspecified()}-{game.Sheet}";
                     var opposingTeam = userTeams.Contains(game.Teams[0].Id)
                         ? game.Teams[1]
