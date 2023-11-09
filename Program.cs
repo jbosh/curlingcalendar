@@ -19,32 +19,40 @@ namespace CurlingCalendar
 {
     class Program
     {
-        private static CookieContainer m_cookieContainer = null!;
-        private static HttpClientHandler m_httpClientHandler = null!;
-        private static HttpClient m_client = null!;
-        private static Uri BaseUri = new("https://denvercurlingclub.com");
-        private static DateTimeZone Timezone = BclDateTimeZone.FromTimeZoneInfo(TimeZoneInfo.Local);
+        private readonly CookieContainer cookieContainer;
+        private readonly HttpClient client;
+        private static readonly Uri BaseUri = new("https://denvercurlingclub.com");
+        private static readonly DateTimeZone Timezone = BclDateTimeZone.FromTimeZoneInfo(TimeZoneInfo.FindSystemTimeZoneById("America/Denver"));
 
         [STAThread]
         public static async Task Main()
+        {
+            var program = new Program();
+            await program.Run();
+        }
+
+        private Program()
+        {
+            cookieContainer = new CookieContainer();
+            var httpClientHandler = new HttpClientHandler()
+            {
+                AutomaticDecompression = DecompressionMethods.All,
+                CookieContainer = this.cookieContainer,
+                UseCookies = true,
+                AllowAutoRedirect = false,
+            };
+
+            client = new HttpClient(httpClientHandler);
+            this.client.BaseAddress = BaseUri;
+            this.client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.90 Safari/537.36");
+        }
+
+        private async Task Run()
         {
             var config = (await File.ReadAllLinesAsync("config.txt"))
                 .Select(l => l.Split(new[] { '=' }, 2))
                 .ToDictionary(s => s[0], s => s[1]);
             Database.Initialize("db.sqlite");
-
-            m_cookieContainer = new CookieContainer();
-            m_httpClientHandler = new HttpClientHandler()
-            {
-                AutomaticDecompression = DecompressionMethods.All,
-                CookieContainer = m_cookieContainer,
-                UseCookies = true,
-                AllowAutoRedirect = false,
-            };
-
-            m_client = new HttpClient(m_httpClientHandler);
-            m_client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.90 Safari/537.36");
-            m_client.BaseAddress = BaseUri;
 
             var updateData = true;
             {
@@ -77,9 +85,9 @@ namespace CurlingCalendar
             {
                 var username = config["username"];
                 var password = config["password"];
-                await Login(username, password);
+                await this.Login(username, password);
 
-                await UpdateLeagueInformation();
+                await this.UpdateLeagueInformation();
                 Database.Meta.Set("last_update", DateTimeOffset.UtcNow.ToString("u"));
             }
 
@@ -98,16 +106,18 @@ namespace CurlingCalendar
                     user = Database.User.FromId(userId);
                     if (user == null)
                     {
-                        Console.WriteLine("Could not find user.");
+                        Console.Out.WriteLine("Could not find user.");
                         continue;
                     }
+                    
+                    Console.Out.WriteLine($"Getting {user.FullName}.");
                 }
                 else
                 {
                     var users = Database.User.FromName(line).ToArray();
                     if (users.Length == 0)
                     {
-                        Console.WriteLine("Invalid user ID or could not find user.");
+                        Console.Out.WriteLine("Invalid user ID or could not find user.");
                         continue;
                     }
 
@@ -122,14 +132,14 @@ namespace CurlingCalendar
                             for (var i = 0; i < users.Length; i++)
                             {
                                 var u = users[i];
-                                Console.WriteLine($"{i + 1}: {u.FullName}");
+                                Console.Out.WriteLine($"{i + 1}: {u.FullName}");
                             }
 
-                            Console.Write("Multiple users were found. Which one would you like to use? [#] ");
+                            Console.Out.Write("Multiple users were found. Which one would you like to use? [#] ");
                             line = Console.ReadLine();
                             if (!int.TryParse(line, out var index) || index <= 0 || index > users.Length)
                             {
-                                Console.WriteLine($"Invalid number.");
+                                Console.Out.WriteLine($"Invalid number.");
                                 continue;
                             }
 
@@ -167,89 +177,93 @@ namespace CurlingCalendar
                 var outPath = $"{user.FullName}.ical";
                 var serializer = new CalendarSerializer(calendar);
                 await File.WriteAllTextAsync(outPath, serializer.SerializeToString());
+                Console.Out.WriteLine($"Wrote games to '{outPath}'.");
             }
 
             Database.Dispose();
         }
 
-        private static async Task Login(string username, string password)
+        private async Task Login(string username, string password)
         {
             Console.WriteLine("Logging in...");
 
             var formData = new Dictionary<string, string>();
 
-            using (var request = new HttpRequestMessage(HttpMethod.Get, "/index.php/member-login"))
+            var loginUrl = "https://denvercurlingclub.com/index.php/component/comprofiler/login";
+            
+            using (var request = new HttpRequestMessage(HttpMethod.Get, loginUrl))
             {
                 request.Headers.Add("Keep-Alive", "true");
-                using var result = await m_client.SendAsync(request);
+                using var result = await this.client.SendAsync(request);
                 var body = await result.Content.ReadAsStringAsync();
 
                 var htmlDoc = new HtmlDocument();
                 htmlDoc.LoadHtml(body);
 
                 var doc = htmlDoc.DocumentNode;
-                var form = doc.SelectNodes("//form[@action=\"https://denvercurlingclub.com/index.php/member-login\"]").First();
+                var form = doc.QuerySelectorAll($"form[action='{loginUrl}']").First();
 
-                var inputs = form.SelectNodes("//input").ToArray();
+                var inputs = form.QuerySelectorAll("input").ToArray();
                 foreach (var input in inputs)
                 {
                     var name = input.GetAttributeValue("name", null);
                     var value = input.GetAttributeValue("value", null);
-                    if (formData.ContainsKey(name))
-                    {
-                        formData[name] = value;
-                    }
-                    else
-                    {
-                        formData.Add(name, value);
-                    }
+                    formData[name] = value;
                 }
             }
 
-            {
-                formData["username"] = username;
-                formData["passwd"] = password;
+            formData["username"] = username;
+            formData["passwd"] = password;
 
-                using var request = new HttpRequestMessage(HttpMethod.Post, "/index.php/member-login");
+            using (var request = new HttpRequestMessage(HttpMethod.Post, loginUrl))
+            {
                 var content = new FormUrlEncodedContent(formData);
 
                 request.Headers.Referrer = new Uri("https://denvercurlingclub.com/index.php/");
                 request.Headers.TryAddWithoutValidation("Origin", "https://denvercurlingclub.com");
-
                 request.Content = content;
-                using var result = await m_client.SendAsync(request);
+                
+                using var result = await this.client.SendAsync(request);
                 if (result.StatusCode != HttpStatusCode.SeeOther)
                 {
                     throw new Exception("Invalid credentials to login.");
                 }
+
+                if (this.cookieContainer.Count <= 1)
+                {
+                    throw new Exception("There should be more than 1 cookie after successful login.");
+                }
             }
         }
 
-        private static async Task UpdateLeagueInformation()
+        private async Task UpdateLeagueInformation()
         {
             Console.WriteLine("Getting league information...");
             var leagues = new List<Database.League>();
             var teamTasks = new List<Task<HtmlNode[]>>();
             var scheduleTasks = new List<Task<HtmlNode[]>>();
             {
-                var infoTables = FetchInfoTable("/index.php/league-information/teams-schedules-standings").Result;
+                var infoTables = this.FetchInfoTable("/index.php/member-menu/league-information/teams-schedules-standings").Result;
 
                 var rows = infoTables.First().QuerySelectorAll("> tr");
                 foreach (var row in rows)
                 {
                     var columns = row.QuerySelectorAll("> td");
                     var leagueName = HttpUtility.HtmlDecode(columns[0].InnerText).Trim();
-                    var teamsLink = HttpUtility.HtmlDecode(columns[2].FirstChild.GetAttributeValue("href", null));
-                    var scheduleLink = HttpUtility.HtmlDecode(columns[3].FirstChild.GetAttributeValue("href", null));
+                    var teamsLink = HttpUtility.HtmlDecode(columns[2].QuerySelector("a").GetAttributeValue("href", null));
+                    var scheduleLink = HttpUtility.HtmlDecode(columns[3].QuerySelector("a").GetAttributeValue("href", null));
                     var url = new Uri(BaseUri, teamsLink);
-                    var leagueId = int.Parse(HttpUtility.ParseQueryString(url.Query).Get("id"));
+                    var leagueId = int.Parse(HttpUtility.ParseQueryString(url.Query).Get("id")!);
 
                     var league = Database.League.Get(leagueId);
                     if (league == null)
+                    {
                         league = Database.League.Create(leagueId, leagueName);
+                    }
+
                     leagues.Add(league);
-                    teamTasks.Add(FetchInfoTable($"/index.php/league-information/teams-schedules-standings?view=tss&layout=leagues_teams&id={leagueId}"));
-                    scheduleTasks.Add(FetchInfoTable($"/index.php/league-information/teams-schedules-standings?view=tss&layout=leagues_schedule&id={leagueId}"));
+                    teamTasks.Add(this.FetchInfoTable(teamsLink));
+                    scheduleTasks.Add(this.FetchInfoTable(scheduleLink));
                 }
             }
 
@@ -283,14 +297,18 @@ namespace CurlingCalendar
                         {
                             var linkNode = columns[columnIndex].QuerySelector("a");
                             if (linkNode == null)
+                            {
                                 continue; // 5th probably
+                            }
 
                             var memberLink = HttpUtility.HtmlDecode(linkNode.GetAttributeValue("href", null));
                             var url = new Uri(BaseUri, memberLink);
-                            var memberId = int.Parse(HttpUtility.ParseQueryString(url.Query).Get("searchid"));
+                            var memberId = int.Parse(HttpUtility.ParseQueryString(url.Query).Get("searchid")!);
                             var memberName = linkNode.InnerText.Trim();
                             if (memberName.Length == 0)
+                            {
                                 continue;
+                            }
 
                             if (team == null)
                             {
@@ -377,12 +395,16 @@ namespace CurlingCalendar
                                 .ToArray();
 
                             if (sheet.Length == 0 || sheet == "BYE")
+                            {
                                 continue;
+                            }
 
                             if (teamNames.Length != 2)
                             {
                                 if (columns[2].InnerText.Contains(" vs."))
+                                {
                                     continue; // bye
+                                }
 
                                 throw new NotImplementedException("Don't know how to interpret team names.");
                             }
@@ -398,7 +420,9 @@ namespace CurlingCalendar
                             }
                             else if (game.Teams[0].Id != teams[0].Id || game.Teams[1].Id != teams[1].Id)
                             {
-                                throw new NotImplementedException("Teams changed.");
+                                Console.Out.WriteLine($"Teams changed at {time}.");
+                                Database.Game.Delete(league.Id, time, sheet);
+                                Database.Game.Create(league.Id, time, sheet, teams[0].Id, teams[1].Id);
                             }
 
                             deletedGames.Remove((league.Id, time, sheet));
@@ -419,10 +443,10 @@ namespace CurlingCalendar
             }
         }
 
-        private static async Task<HtmlNode[]> FetchInfoTable(string url)
+        private async Task<HtmlNode[]> FetchInfoTable(string url)
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            var result = await m_client.SendAsync(request);
+            var result = await this.client.SendAsync(request);
             var body = await result.Content.ReadAsStringAsync();
 
             var htmlDoc = new HtmlDocument();
