@@ -4,7 +4,6 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
-using System.Text;
 using System.Threading.Tasks;
 using System.Web;
 using HtmlAgilityPack;
@@ -14,6 +13,7 @@ using Ical.Net.CalendarComponents;
 using Ical.Net.DataTypes;
 using Ical.Net.Serialization;
 using NodaTime;
+using NodaTime.TimeZones;
 
 namespace CurlingCalendar
 {
@@ -22,8 +22,8 @@ namespace CurlingCalendar
         private static CookieContainer m_cookieContainer = null!;
         private static HttpClientHandler m_httpClientHandler = null!;
         private static HttpClient m_client = null!;
-        private static Uri BaseUri = new Uri("https://denvercurlingclub.com");
-        private static DateTimeZone Timezone = DateTimeZone.ForOffset(Offset.FromHours(-6)); // Colorado timezone
+        private static Uri BaseUri = new("https://denvercurlingclub.com");
+        private static DateTimeZone Timezone = BclDateTimeZone.FromTimeZoneInfo(TimeZoneInfo.Local);
 
         [STAThread]
         public static async Task Main()
@@ -62,9 +62,13 @@ namespace CurlingCalendar
                         Console.Write($"Last update was {lastUpdate.ToLocalTime()} ({span} ago). Would you like to update [yN]? ");
                         var line = Console.ReadLine()!;
                         if (line.Length == 0)
+                        {
                             updateData = false;
+                        }
                         else if (line[0] == 'n' || line[0] == 'N')
+                        {
                             updateData = false;
+                        }
                     }
                 }
             }

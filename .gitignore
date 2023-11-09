@@ -1,5 +1,6 @@
 *.suo
 
+.idea/
 bin/
 obj/
 nocommit/
